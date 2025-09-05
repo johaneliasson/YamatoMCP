@@ -29,7 +29,7 @@ func main() {
 
 	mcp.AddTool(server, &mcp.Tool{Name: "yamato_job_id", Description: "Fetch data for a given Yamato Job ID"}, GetYamatoDataForJobID)
 
-	mcp.AddTool(server, &mcp.Tool{Name: "yamato_job_definition", Description: "Provides build history for given job definition"}, GetYamatoJobDefinitionHistory)
+	mcp.AddTool(server, &mcp.Tool{Name: "yamato_job_definition", Description: "Provides build history for given Yamato job definition"}, GetYamatoJobDefinitionHistory)
 
 	flag.Parse()
 
@@ -38,21 +38,23 @@ func main() {
 
 		// Create a single transport instance that handles all connections
 		sessionID := generateSessionID()
-		transport := mcp.NewStreamableServerTransport(sessionID)
+		transport := mcp.StreamableServerTransport{
+			SessionID: sessionID,
+		}
 
 		// Start the server in a goroutine
 		go func() {
-			if err := server.Run(context.Background(), transport); err != nil {
+			if err := server.Run(context.Background(), &transport); err != nil {
 				log.Printf("Server error: %v", err)
 			}
 		}()
 
 		// Register the HTTP handler
-		http.Handle("/mcp", transport)
+		http.Handle("/mcp", &transport)
 		log.Fatal(http.ListenAndServe(*httpAddr, nil))
 	} else {
 		log.Printf("Starting MCP server on stdin/stdout")
-		if err := server.Run(context.Background(), mcp.NewStdioTransport()); err != nil {
+		if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -89,7 +91,7 @@ func generateSessionID() string {
 	return hex.EncodeToString(bytes)
 }
 
-func GetYamatoJobDefinitionHistory(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[YamatoJobDefinitionParams]) (*mcp.CallToolResultFor[any], error) {
+func GetYamatoJobDefinitionHistory(ctx context.Context, req *mcp.CallToolRequest, args YamatoJobDefinitionParams) (*mcp.CallToolResult, any, error) {
 	// Get History of Yamato jobs using the Yamato API for a given job definition
 	client := http.Client{Timeout: 5 * time.Second}
 	//url_yamato_history := "https://yamato-api.cds.internal.unity3d.com/jobs" + url.QueryEscape("pageSize=50&filter=project eq 3 and filename eq '"+params.Arguments.JobDefinition+"'") //ie .yamato/utr.yml#build_utr_win
@@ -98,7 +100,7 @@ func GetYamatoJobDefinitionHistory(ctx context.Context, cc *mcp.ServerSession, p
 	u, _ := url.Parse("https://yamato-api.cds.internal.unity3d.com/jobs")
 	q := u.Query()
 	q.Set("pageSize", "50")
-	q.Set("filter", "project eq 3 and filename eq '"+params.Arguments.JobDefinition+"'") //ie .yamato/utr.yml#build_utr_win
+	q.Set("filter", "project eq 3 and filename eq '"+args.JobDefinition+"'") //ie .yamato/utr.yml#build_utr_win
 	u.RawQuery = q.Encode()
 
 	l := log.New(os.Stderr, "", 0)
@@ -110,7 +112,7 @@ func GetYamatoJobDefinitionHistory(ctx context.Context, cc *mcp.ServerSession, p
 	request.Header.Set("Authorization", "Bearer "+YamatoBearerToken)
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer func(Body io.ReadCloser) {
@@ -126,16 +128,16 @@ func GetYamatoJobDefinitionHistory(ctx context.Context, cc *mcp.ServerSession, p
 
 	YamatoJobDefinitionHistory, err := json.Marshal(responseBody)
 
-	return &mcp.CallToolResultFor[any]{
+	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(YamatoJobDefinitionHistory)}},
-	}, nil
+	}, nil, err
 }
 
-func GetYamatoDataForJobID(ctx context.Context, cc *mcp.ServerSession, params *mcp.CallToolParamsFor[YamatoJobParams]) (*mcp.CallToolResultFor[any], error) {
+func GetYamatoDataForJobID(ctx context.Context, req *mcp.CallToolRequest, args YamatoJobDefinitionParams) (*mcp.CallToolResult, any, error) {
 
 	// Get Yamato job data using the Yamato API for a given Job ID
 	client := http.Client{Timeout: 5 * time.Second}
-	url := "https://yamato-api.cds.internal.unity3d.com/jobs/" + params.Arguments.YamatoJobId
+	url := "https://yamato-api.cds.internal.unity3d.com/jobs/" + args.JobDefinition
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Content-Type", "application/json")
@@ -143,7 +145,7 @@ func GetYamatoDataForJobID(ctx context.Context, cc *mcp.ServerSession, params *m
 
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	defer func(Body io.ReadCloser) {
@@ -159,7 +161,7 @@ func GetYamatoDataForJobID(ctx context.Context, cc *mcp.ServerSession, params *m
 
 	YamatoJobInfoJSON, err := json.Marshal(responseBody)
 
-	return &mcp.CallToolResultFor[any]{
+	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(YamatoJobInfoJSON)}},
-	}, nil
+	}, nil, err
 }
